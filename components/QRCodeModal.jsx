@@ -9,7 +9,7 @@ export default function QRCodeModal({ code, onClose, copyToClipboard }) {
 
   const getInviteUrl = () => {
     if (typeof window === 'undefined') return '';
-    return `${window.location.origin}/?join=${code}`;
+    return `${window.location.origin}/#${code}`;
   };
 
   const inviteUrl = getInviteUrl();

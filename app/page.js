@@ -17,22 +17,47 @@ export default function Home() {
 
   useEffect(() => {
     try {
+      // 1. Auto-detect invite from hash #RIXXXX or search query
+      let codeFromUrl = '';
+      if (typeof window !== 'undefined') {
+        if (window.location.hash) {
+          const hashClean = window.location.hash.replace(/[^A-Za-z0-9]/g, '').toUpperCase().trim();
+          if (hashClean.length === 6) {
+            codeFromUrl = hashClean;
+          }
+        }
+        if (!codeFromUrl && window.location.search) {
+          const params = new URLSearchParams(window.location.search);
+          const rawCode = (params.get('join') || params.get('code') || params.get('r') || '').toUpperCase().trim();
+          if (rawCode.length === 6) {
+            codeFromUrl = rawCode;
+          }
+        }
+
+        // IMMEDIATELY clean the address bar so the browser URL ALWAYS stays strictly '/'
+        if (window.location.hash || window.location.search) {
+          window.history.replaceState(null, '', window.location.pathname || '/');
+        }
+      }
+
+      // If invite code was scanned or opened, auto-connect directly into private room
+      if (codeFromUrl) {
+        const anonName = generateAnonymousName();
+        const session = { code: codeFromUrl, role: 'joiner', mode: 'private', username: anonName };
+        try {
+          sessionStorage.setItem('linkchat_active_session', JSON.stringify(session));
+        } catch (e) {}
+        setActiveSession(session);
+        return;
+      }
+
+      // Check existing saved session
       const savedSession = sessionStorage.getItem('linkchat_active_session');
       if (savedSession) {
         const parsed = JSON.parse(savedSession);
         if (parsed && parsed.code && parsed.role) {
           setActiveSession(parsed);
           return;
-        }
-      }
-
-      // Auto-detect invite link with ?join=RIXXXX or ?code=RIXXXX
-      if (typeof window !== 'undefined' && window.location.search) {
-        const params = new URLSearchParams(window.location.search);
-        const codeFromUrl = (params.get('join') || params.get('code') || '').toUpperCase().trim();
-        if (codeFromUrl.length === 6) {
-          setJoinCode(codeFromUrl);
-          setActiveTab('join');
         }
       }
     } catch (e) {}
