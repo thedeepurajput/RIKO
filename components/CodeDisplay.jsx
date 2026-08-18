@@ -69,7 +69,7 @@ export default function CodeDisplay({ code, onBack, copyToClipboard }) {
               cursor: 'pointer',
             }}
           >
-            📱 Show QR Code / Share Link
+            📱 Scan QR Code to Connect
           </button>
 
           {onBack && (

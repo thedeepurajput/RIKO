@@ -1,5 +1,5 @@
 /* ============================================================
-   LinkChat — globals.css
+   RIKO — globals.css
    All fixes annotated inline
    ============================================================ */
 
@@ -1820,4 +1820,123 @@ body {
 .btn-secondary:hover {
   background: rgba(255, 255, 255, 0.12);
 }
+
+/* ============================================================
+   Privacy Policy Modal & Footer
+   ============================================================ */
+
+.privacy-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.8);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  animation: fade-in 0.2s ease-out;
+}
+
+.privacy-modal-card {
+  background: rgba(13, 18, 30, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 24px;
+  max-width: 520px;
+  width: 100%;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 25px 70px rgba(0, 0, 0, 0.9), 0 0 40px rgba(99, 102, 241, 0.18);
+  overflow: hidden;
+}
+
+.privacy-modal-header {
+  padding: 1.25rem 1.5rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.privacy-modal-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.privacy-modal-title h3 {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #f1f5f9;
+}
+
+.privacy-modal-close {
+  background: none;
+  border: none;
+  color: #94a3b8;
+  font-size: 1.2rem;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 8px;
+}
+
+.privacy-modal-close:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.privacy-modal-body {
+  padding: 1.5rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1.2rem;
+}
+
+.privacy-section h4 {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: #818cf8;
+  margin-bottom: 0.35rem;
+}
+
+.privacy-section p {
+  font-size: 0.84rem;
+  color: #94a3b8;
+  line-height: 1.55;
+}
+
+.privacy-modal-footer {
+  padding: 1rem 1.5rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(8, 11, 20, 0.6);
+}
+
+/* Home page footer & expanded features */
+.home-footer {
+  text-align: center;
+  margin-top: 0.5rem;
+}
+
+.privacy-policy-link {
+  background: none;
+  border: none;
+  color: #64748b;
+  font-size: 0.8rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: color 0.15s ease;
+  padding: 4px 10px;
+  border-radius: 8px;
+}
+
+.privacy-policy-link:hover {
+  color: #818cf8;
+  background: rgba(99, 102, 241, 0.08);
+}
+
 

@@ -4,16 +4,16 @@ import { useState, useEffect } from 'react';
 import { generateCode } from '@/lib/generateCode';
 import { generateAnonymousName } from '@/lib/randomNames';
 import ChatRoom from '@/components/ChatRoom';
+import PrivacyModal from '@/components/PrivacyModal';
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState('start');
   const [joinCode, setJoinCode] = useState('');
-  // FIX: Separate username states per tab — shared state was confusing
-  // (typing a name in Private tab would pre-fill Join tab)
   const [createUsername, setCreateUsername] = useState('');
   const [joinUsername, setJoinUsername] = useState('');
   const [error, setError] = useState('');
   const [activeSession, setActiveSession] = useState(null);
+  const [showPrivacy, setShowPrivacy] = useState(false);
 
   useEffect(() => {
     try {
@@ -45,14 +45,14 @@ export default function Home() {
         const anonName = generateAnonymousName();
         const session = { code: codeFromUrl, role: 'joiner', mode: 'private', username: anonName };
         try {
-          sessionStorage.setItem('linkchat_active_session', JSON.stringify(session));
+          sessionStorage.setItem('riko_active_session', JSON.stringify(session));
         } catch (e) {}
         setActiveSession(session);
         return;
       }
 
       // Check existing saved session
-      const savedSession = sessionStorage.getItem('linkchat_active_session');
+      const savedSession = sessionStorage.getItem('riko_active_session');
       if (savedSession) {
         const parsed = JSON.parse(savedSession);
         if (parsed && parsed.code && parsed.role) {
@@ -74,7 +74,7 @@ export default function Home() {
     const username = resolveUsername(createUsername, generateAnonymousName());
     const session = { code, role: 'creator', mode: 'private', username };
     try {
-      sessionStorage.setItem('linkchat_active_session', JSON.stringify(session));
+      sessionStorage.setItem('riko_active_session', JSON.stringify(session));
     } catch (e) {}
     setActiveSession(session);
   };
@@ -91,7 +91,7 @@ export default function Home() {
     const username = resolveUsername(joinUsername, generateAnonymousName());
     const session = { code: cleaned, role: 'joiner', mode: 'private', username };
     try {
-      sessionStorage.setItem('linkchat_active_session', JSON.stringify(session));
+      sessionStorage.setItem('riko_active_session', JSON.stringify(session));
     } catch (e) {}
     setActiveSession(session);
   };
@@ -100,7 +100,7 @@ export default function Home() {
     const anonName = generateAnonymousName();
     const session = { code: 'PUBLIC99', role: 'joiner', mode: 'public', username: anonName };
     try {
-      sessionStorage.setItem('linkchat_active_session', JSON.stringify(session));
+      sessionStorage.setItem('riko_active_session', JSON.stringify(session));
     } catch (e) {}
     setActiveSession(session);
   };
@@ -113,7 +113,7 @@ export default function Home() {
 
   const handleLeaveSession = () => {
     try {
-      sessionStorage.removeItem('linkchat_active_session');
+      sessionStorage.removeItem('riko_active_session');
     } catch (e) {}
     setActiveSession(null);
     setJoinCode('');
@@ -144,7 +144,7 @@ export default function Home() {
       <div className="home-content">
         <div className="logo-section">
           <div className="logo-icon">⚡</div>
-          <h1 className="app-title">LinkChat</h1>
+          <h1 className="app-title">RIKO</h1>
           <p className="app-subtitle">Ephemeral · P2P Encrypted · Auto-Vanish</p>
         </div>
 
@@ -268,10 +268,39 @@ export default function Home() {
           </div>
           <div className="feature-item">
             <span className="feature-icon">⚡</span>
-            <h3 className="feature-title">50MB Files</h3>
+            <h3 className="feature-title">Unlimited Files</h3>
             <p className="feature-desc">Direct WebRTC stream</p>
           </div>
+          <div className="feature-item">
+            <span className="feature-icon">📞</span>
+            <h3 className="feature-title">Voice & Video</h3>
+            <p className="feature-desc">Encrypted HD calls</p>
+          </div>
+          <div className="feature-item">
+            <span className="feature-icon">🎙️</span>
+            <h3 className="feature-title">Voice Notes</h3>
+            <p className="feature-desc">Push-to-talk waveforms</p>
+          </div>
+          <div className="feature-item">
+            <span className="feature-icon">📱</span>
+            <h3 className="feature-title">Silent QR</h3>
+            <p className="feature-desc">Optical scan, 100% clean URL</p>
+          </div>
         </div>
+
+        <footer className="home-footer">
+          <button
+            type="button"
+            className="privacy-policy-link"
+            onClick={() => setShowPrivacy(true)}
+          >
+            🛡️ Zero-Knowledge Privacy Policy & Security Guarantee
+          </button>
+        </footer>
+
+        {showPrivacy && (
+          <PrivacyModal onClose={() => setShowPrivacy(false)} />
+        )}
       </div>
     </div>
   );

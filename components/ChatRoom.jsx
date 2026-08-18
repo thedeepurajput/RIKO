@@ -36,7 +36,7 @@ function generateMsgId(prefix) {
 export default function ChatRoom({ code, role, mode, username, onLeave }) {
   const [messages, setMessages] = useState(() => {
     try {
-      const cached = sessionStorage.getItem('linkchat_msgs_' + code);
+      const cached = sessionStorage.getItem('riko_msgs_' + code);
       if (!cached) return [];
       const parsed = JSON.parse(cached);
       return parsed.map((msg) =>
@@ -107,7 +107,7 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
       const serializable = messages.map((msg) =>
         msg.type === 'file' || msg.type === 'voice' ? { ...msg, fileData: null, audioData: null } : msg
       );
-      sessionStorage.setItem('linkchat_msgs_' + code, JSON.stringify(serializable));
+      sessionStorage.setItem('riko_msgs_' + code, JSON.stringify(serializable));
     } catch (e) {}
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, code]);
@@ -188,7 +188,7 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
         const peerId = sourceConn.peer;
         const registeredName = peerIdentityMap.current.get(peerId);
         if (registeredName && registeredName !== data.senderName) {
-          console.warn(`[LinkChat] Spoof blocked from ${peerId}: claimed "${data.senderName}", registered "${registeredName}"`);
+          console.warn(`[RIKO] Spoof blocked from ${peerId}: claimed "${data.senderName}", registered "${registeredName}"`);
           return;
         }
       }
@@ -284,8 +284,8 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
 
   const exitRoom = useCallback(() => {
     try {
-      sessionStorage.removeItem('linkchat_active_session');
-      sessionStorage.removeItem('linkchat_msgs_' + code);
+      sessionStorage.removeItem('riko_active_session');
+      sessionStorage.removeItem('riko_msgs_' + code);
     } catch (e) {}
     if (typeof window !== 'undefined') window.history.replaceState({}, '', '/');
     if (onLeave) {
@@ -539,7 +539,7 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
     async function init() {
       try {
         if (mode === 'public') {
-          const publicLobbyId = 'linkchat-public-room-hub-v5';
+          const publicLobbyId = 'riko-public-room-hub-v5';
           let peer;
           try {
             peer = await createPeer(publicLobbyId);
@@ -567,7 +567,7 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
             await new Promise((res) => setTimeout(res, 200 + jitter));
             if (destroyed) return;
 
-            const guestId = 'linkchat-guest-' + generateMsgId('g');
+            const guestId = 'riko-guest-' + generateMsgId('g');
             peer = await createPeer(guestId);
             if (destroyed) { peer.destroy(); return; }
             peerRef.current = peer;
@@ -589,7 +589,7 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
             });
           }
         } else if (role === 'creator') {
-          const peerTargetId = 'linkchat-room-' + cleanCode;
+          const peerTargetId = 'riko-room-' + cleanCode;
           const peer = await createPeer(peerTargetId);
           if (destroyed) { peer.destroy(); return; }
           peerRef.current = peer;
@@ -609,7 +609,7 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
             });
           });
         } else {
-          const peerTargetId = 'linkchat-room-' + cleanCode;
+          const peerTargetId = 'riko-room-' + cleanCode;
           const peer = await createPeer(null);
           if (destroyed) { peer.destroy(); return; }
           peerRef.current = peer;
@@ -979,13 +979,13 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
             {isMutedSound ? '🔇' : '🔊'}
           </button>
 
-          {/* QR Code Share button in private mode */}
+          {/* QR Code Scan button in private mode */}
           {mode !== 'public' && (
             <button
               className="call-header-btn"
               onClick={() => setShowQRModal(true)}
-              title="Show QR Code & Invite Link"
-              aria-label="Share room QR code"
+              title="Scan QR Code to Connect"
+              aria-label="Scan room QR code"
             >
               📱
             </button>

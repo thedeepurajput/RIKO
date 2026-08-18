@@ -1,1 +1,3 @@
-# LinkChat Static Assets
+# RIKO Static Assets
+User-agent: *
+Allow: /

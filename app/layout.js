@@ -23,11 +23,11 @@ export const viewport = {
 };
 
 export const metadata = {
-  title: 'LinkChat — Ephemeral Encrypted Chat',
+  title: 'RIKO — Ephemeral Encrypted Chat',
   description: 'Start a private, ephemeral chat with anyone. Share a code, connect instantly, and chat securely. All data auto-deletes after inactivity.',
-  keywords: 'chat, ephemeral, private, encrypted, p2p, peer-to-peer, temporary',
+  keywords: 'riko, chat, ephemeral, private, encrypted, p2p, peer-to-peer, temporary',
   openGraph: {
-    title: 'LinkChat — Ephemeral Encrypted Chat',
+    title: 'RIKO — Ephemeral Encrypted Chat',
     description: 'Private, code-based chat that auto-deletes. No sign-up required.',
     type: 'website',
   },
