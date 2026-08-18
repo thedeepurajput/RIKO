@@ -1,4 +1,4 @@
-﻿import { Inter, JetBrains_Mono } from 'next/font/google';
+import { Inter, JetBrains_Mono } from 'next/font/google';
 import './globals.css';
 
 const inter = Inter({
@@ -12,6 +12,15 @@ const jetbrainsMono = JetBrains_Mono({
   variable: '--font-mono-jb',
   display: 'swap',
 });
+
+export const viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  viewportFit: 'cover',
+  themeColor: '#080b14',
+};
 
 export const metadata = {
   title: 'LinkChat — Ephemeral Encrypted Chat',

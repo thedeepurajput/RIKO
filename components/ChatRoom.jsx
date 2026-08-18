@@ -4,16 +4,16 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { createPeer, connectToPeer } from '@/lib/peer';
 import { InactivityTracker } from '@/lib/inactivityTracker';
 import { validateFile, prepareFileForSending } from '@/lib/fileTransfer';
+import { getLocalStream, callPeer, answerCall, endCall } from '@/lib/callManager';
 import MessageBubble from './MessageBubble';
 import FileMessage from './FileMessage';
 import ConnectionStatus from './ConnectionStatus';
 import CodeDisplay from './CodeDisplay';
+import CallUI from './CallUI';
 
 const SEEN_IDS_MAX = 500;
 const SEEN_IDS_TRIM = 100;
 
-// FIX: Crypto-based unique ID generator for messages — replaces Math.random()
-// which could theoretically collide when two messages are sent in the same ms.
 function generateMsgId(prefix) {
   const arr = new Uint32Array(2);
   crypto.getRandomValues(arr);
@@ -26,7 +26,6 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
       const cached = sessionStorage.getItem('linkchat_msgs_' + code);
       if (!cached) return [];
       const parsed = JSON.parse(cached);
-      // Strip fileData — ArrayBuffer doesn't survive JSON serialization
       return parsed.map((msg) =>
         msg.type === 'file' ? { ...msg, fileData: null } : msg
       );
@@ -44,9 +43,18 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
   const [isDragging, setIsDragging] = useState(false);
   const [typingUsers, setTypingUsers] = useState({});
   const [error, setError] = useState(null);
-  // FIX: Track copy feedback for room code in header
   const [codeCopied, setCodeCopied] = useState(false);
 
+  // ── Call state ───────────────────────────────────────────────────────────
+  const [callState, setCallState] = useState('idle');   // 'idle'|'incoming'|'outgoing'|'active'
+  const [callType, setCallType] = useState('audio');    // 'audio'|'video'|'screen'
+  const [callerName, setCallerName] = useState('');
+  const [localStream, setLocalStream] = useState(null);
+  const [remoteStream, setRemoteStream] = useState(null);
+  const activeCallRef = useRef(null);
+  const pendingCallRef = useRef(null);
+
+  // ── Refs ─────────────────────────────────────────────────────────────────
   const peerRef = useRef(null);
   const connectionsRef = useRef([]);
   const seenMessageIds = useRef(new Set());
@@ -57,18 +65,23 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
   const inputRef = useRef(null);
   const presenceIntervalRef = useRef(null);
   const typingTimeoutRef = useRef(null);
-  // FIX: Track peers that are currently typing, with disconnect cleanup
   const typingPeerTimers = useRef({});
   const isSetupRef = useRef(false);
 
-  // Keep URL clean
+  // FIX: Store attachCallListener in a ref so the peer-setup useEffect can
+  // call it without needing it in its dependency array — avoids the
+  // "Cannot access before initialization" ReferenceError that happens when
+  // a useCallback const is referenced in an earlier useEffect closure.
+  const attachCallListenerRef = useRef(null);
+
+  // ── Simple effects ───────────────────────────────────────────────────────
+
   useEffect(() => {
     if (typeof window !== 'undefined' && window.location.pathname !== '/') {
       window.history.replaceState({}, '', '/');
     }
   }, []);
 
-  // Persist messages — strip fileData before saving
   useEffect(() => {
     try {
       const serializable = messages.map((msg) =>
@@ -79,7 +92,6 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, code]);
 
-  // iOS keyboard — visualViewport resize listener
   useEffect(() => {
     const vv = window.visualViewport;
     if (!vv) return;
@@ -98,6 +110,8 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
       document.documentElement.style.setProperty('--keyboard-offset', '0px');
     };
   }, []);
+
+  // ── Core callbacks ───────────────────────────────────────────────────────
 
   const addMessage = useCallback((msg) => {
     setMessages((prev) => [...prev, msg]);
@@ -121,11 +135,9 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
     seenMessageIds.current.add(id);
   }, []);
 
-  // FIX: Clear typing state for a peer when they disconnect
   const clearTypingForPeer = useCallback((peerId) => {
     const name = peerIdentityMap.current.get(peerId);
     if (!name) return;
-    // Clear any auto-clear timer for this user
     if (typingPeerTimers.current[name]) {
       clearTimeout(typingPeerTimers.current[name]);
       delete typingPeerTimers.current[name];
@@ -140,11 +152,8 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
 
   const handleIncomingData = useCallback(
     (data, sourceConn) => {
-      if (trackerRef.current) {
-        trackerRef.current.recordRemoteActivity();
-      }
+      if (trackerRef.current) trackerRef.current.recordRemoteActivity();
 
-      // HANDSHAKE — register direct peer identity only (no relay)
       if (data.type === 'handshake') {
         const peerId = sourceConn?.peer;
         if (peerId && data.senderName) {
@@ -152,23 +161,18 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
             peerIdentityMap.current.set(peerId, data.senderName);
           }
         }
-        return; // Never relay handshakes
+        return;
       }
 
-      // IDENTITY VERIFICATION — drop spoofed senderNames
       if (data.senderName && sourceConn) {
         const peerId = sourceConn.peer;
         const registeredName = peerIdentityMap.current.get(peerId);
         if (registeredName && registeredName !== data.senderName) {
-          console.warn(
-            `[LinkChat] Spoof blocked from ${peerId}: ` +
-            `claimed "${data.senderName}", registered "${registeredName}"`
-          );
+          console.warn(`[LinkChat] Spoof blocked from ${peerId}: claimed "${data.senderName}", registered "${registeredName}"`);
           return;
         }
       }
 
-      // PRESENCE
       if (data.type === 'presence') {
         if (typeof data.count === 'number') {
           const localCount = connectionsRef.current.filter((c) => c && c.open).length + 1;
@@ -178,17 +182,11 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
         return;
       }
 
-      // TYPING
       if (data.type === 'typing') {
         const who = data.senderName || 'Partner';
         setTypingUsers((prev) => ({ ...prev, [who]: Boolean(data.isTyping) }));
-
-        // FIX: Auto-clear typing indicator after 4s in case the stop signal
-        // never arrives (e.g. peer disconnects mid-typing)
         if (data.isTyping) {
-          if (typingPeerTimers.current[who]) {
-            clearTimeout(typingPeerTimers.current[who]);
-          }
+          if (typingPeerTimers.current[who]) clearTimeout(typingPeerTimers.current[who]);
           typingPeerTimers.current[who] = setTimeout(() => {
             setTypingUsers((prev) => {
               if (!prev[who]) return prev;
@@ -204,19 +202,16 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
             delete typingPeerTimers.current[who];
           }
         }
-
         floodBroadcast(data, sourceConn);
         return;
       }
 
-      // DEDUPLICATION
       if (data.id && seenMessageIds.current.has(data.id)) return;
       if (data.id) trackMessageId(data.id);
 
       floodBroadcast(data, sourceConn);
 
       if (data.type === 'text') {
-        // Clear typing when message arrives
         if (data.senderName) {
           setTypingUsers((prev) => {
             const next = { ...prev };
@@ -258,15 +253,113 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
       sessionStorage.removeItem('linkchat_active_session');
       sessionStorage.removeItem('linkchat_msgs_' + code);
     } catch (e) {}
-    if (typeof window !== 'undefined') {
-      window.history.replaceState({}, '', '/');
-    }
+    if (typeof window !== 'undefined') window.history.replaceState({}, '', '/');
     if (onLeave) {
       onLeave();
     } else if (typeof window !== 'undefined') {
       window.location.href = '/';
     }
   }, [onLeave, code]);
+
+  // ── Call helpers ─────────────────────────────────────────────────────────
+
+  const cleanupCall = useCallback((callToClose) => {
+    endCall(localStream, callToClose || activeCallRef.current);
+    activeCallRef.current = null;
+    pendingCallRef.current = null;
+    setLocalStream(null);
+    setRemoteStream(null);
+    setCallState('idle');
+    setCallerName('');
+  }, [localStream]);
+
+  // Keep a stable ref so the peer-setup useEffect (below) can always call
+  // the latest version without it being a dependency.
+  useEffect(() => {
+    attachCallListenerRef.current = (peer) => {
+      peer.on('call', (call) => {
+        const remoteId = call.peer;
+        const remoteName =
+          peerIdentityMap.current.get(remoteId) ||
+          call.metadata?.callerName ||
+          'Partner';
+        const type = call.metadata?.type || 'audio';
+
+        pendingCallRef.current = call;
+        setCallerName(remoteName);
+        setCallType(type);
+        setCallState('incoming');
+
+        call.on('close', () => cleanupCall(call));
+        call.on('error', (err) => {
+          console.error('Incoming call error:', err);
+          cleanupCall(call);
+        });
+      });
+    };
+  }, [cleanupCall]);
+
+  const startCall = useCallback(async (type) => {
+    const openConns = connectionsRef.current.filter((c) => c && c.open);
+    if (openConns.length === 0) return;
+    try {
+      const stream = await getLocalStream(type === 'screen' ? 'screen' : type);
+      setLocalStream(stream);
+      setCallType(type);
+      setCallState('outgoing');
+
+      const remoteId = openConns[0].peer;
+      const remoteName = peerIdentityMap.current.get(remoteId) || 'Partner';
+      setCallerName(remoteName);
+
+      const call = callPeer(peerRef.current, remoteId, stream, { type, callerName: username });
+      activeCallRef.current = call;
+
+      call.on('stream', (remStream) => {
+        setRemoteStream(remStream);
+        setCallState('active');
+      });
+      call.on('close', () => cleanupCall(call));
+      call.on('error', (err) => {
+        console.error('Call error:', err);
+        cleanupCall(call);
+      });
+    } catch (err) {
+      console.error('Start call error:', err);
+      setCallState('idle');
+    }
+  }, [username, cleanupCall]);
+
+  const handleAcceptCall = useCallback(async () => {
+    const call = pendingCallRef.current;
+    if (!call) return;
+    try {
+      const stream = await getLocalStream(callType === 'screen' ? 'video' : callType);
+      setLocalStream(stream);
+      answerCall(call, stream);
+      activeCallRef.current = call;
+      call.on('stream', (remStream) => {
+        setRemoteStream(remStream);
+        setCallState('active');
+      });
+    } catch (err) {
+      console.error('Accept call error:', err);
+      cleanupCall(call);
+    }
+  }, [callType, cleanupCall]);
+
+  const handleRejectCall = useCallback(() => {
+    const call = pendingCallRef.current;
+    if (call) { try { call.close(); } catch (e) {} }
+    pendingCallRef.current = null;
+    setCallState('idle');
+  }, []);
+
+  const handleHangUp = useCallback(() => {
+    cleanupCall(activeCallRef.current);
+  }, [cleanupCall]);
+
+  // ── Peer setup useEffect ─────────────────────────────────────────────────
 
   useEffect(() => {
     if (isSetupRef.current) return;
@@ -308,9 +401,7 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
     }
 
     function cleanup() {
-      // Reset so Strict Mode second mount can re-initialize
       isSetupRef.current = false;
-
       if (presenceIntervalRef.current) {
         clearInterval(presenceIntervalRef.current);
         presenceIntervalRef.current = null;
@@ -319,13 +410,19 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
         clearTimeout(typingTimeoutRef.current);
         typingTimeoutRef.current = null;
       }
-      // FIX: Clear all stale typing timers on cleanup
       Object.values(typingPeerTimers.current).forEach(clearTimeout);
       typingPeerTimers.current = {};
-
       if (trackerRef.current) {
         trackerRef.current.destroy();
         trackerRef.current = null;
+      }
+      if (activeCallRef.current) {
+        try { activeCallRef.current.close(); } catch (e) {}
+        activeCallRef.current = null;
+      }
+      if (pendingCallRef.current) {
+        try { pendingCallRef.current.close(); } catch (e) {}
+        pendingCallRef.current = null;
       }
       connectionsRef.current.forEach((conn) => {
         try { conn.close(); } catch (e) {}
@@ -339,19 +436,14 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
     }
 
     const sendHandshake = (conn) => {
-      try {
-        conn.send({ type: 'handshake', senderName: username });
-      } catch (e) {
-        console.error('Handshake send error:', e);
-      }
+      try { conn.send({ type: 'handshake', senderName: username }); }
+      catch (e) { console.error('Handshake send error:', e); }
     };
 
     const attachConnection = (conn) => {
       const onOpen = () => {
         if (destroyed) return;
-        if (!connectionsRef.current.includes(conn)) {
-          connectionsRef.current.push(conn);
-        }
+        if (!connectionsRef.current.includes(conn)) connectionsRef.current.push(conn);
         setConnectionStatus('connected');
         sendHandshake(conn);
         const count = connectionsRef.current.filter((c) => c && c.open).length + 1;
@@ -370,9 +462,7 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
 
       conn.on('close', () => {
         if (destroyed) return;
-        // FIX: Clear typing indicator for disconnected peer
         clearTypingForPeer(conn.peer);
-
         connectionsRef.current = connectionsRef.current.filter((c) => c !== conn);
         peerIdentityMap.current.delete(conn.peer);
         const count = connectionsRef.current.filter((c) => c && c.open).length + 1;
@@ -386,6 +476,12 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
       conn.on('error', (err) => console.error('Peer connection error:', err));
     };
 
+    // Use the ref so we always call the latest version without it being
+    // a dependency of this effect (avoids re-running the whole setup).
+    const attachCallListener = (peer) => {
+      attachCallListenerRef.current?.(peer);
+    };
+
     async function init() {
       try {
         if (mode === 'public') {
@@ -395,6 +491,7 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
             peer = await createPeer(publicLobbyId);
             if (destroyed) { peer.destroy(); return; }
             peerRef.current = peer;
+            attachCallListener(peer);
             setConnectionStatus('connected');
             setOnlineCount(1);
             startInactivityTracker();
@@ -420,6 +517,7 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
             peer = await createPeer(guestId);
             if (destroyed) { peer.destroy(); return; }
             peerRef.current = peer;
+            attachCallListener(peer);
             setConnectionStatus('connecting');
             peer.on('connection', (conn) => attachConnection(conn));
 
@@ -441,9 +539,8 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
           const peer = await createPeer(peerTargetId);
           if (destroyed) { peer.destroy(); return; }
           peerRef.current = peer;
+          attachCallListener(peer);
           setConnectionStatus('waiting');
-          // FIX: Start inactivity tracker for creator too — uses local-only
-          // idle logic until a peer connects (peerEverConnected flag in tracker)
           startInactivityTracker();
           peer.on('connection', (conn) => {
             attachConnection(conn);
@@ -462,6 +559,7 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
           const peer = await createPeer(null);
           if (destroyed) { peer.destroy(); return; }
           peerRef.current = peer;
+          attachCallListener(peer);
           setConnectionStatus('connecting');
           peer.on('connection', (conn) => attachConnection(conn));
 
@@ -492,17 +590,16 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
     };
   }, [code, role, mode, addMessage, handleIncomingData, floodBroadcast, exitRoom, username, clearTypingForPeer]);
 
+  // ── Activity & input handlers ────────────────────────────────────────────
+
   const recordActivity = useCallback(() => {
-    if (trackerRef.current) {
-      trackerRef.current.recordLocalActivity();
-    }
+    if (trackerRef.current) trackerRef.current.recordLocalActivity();
   }, []);
 
   const handleInputChange = (e) => {
     const text = e.target.value;
     setInputText(text);
     recordActivity();
-
     if (connectionStatus === 'connected') {
       floodBroadcast({ type: 'typing', isTyping: true, senderName: username });
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
@@ -515,17 +612,12 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
   const sendMessage = useCallback(() => {
     const text = inputText.trim();
     if (!text) return;
-
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-
-    // FIX: Guard broadcast — only send if actually connected
     if (connectionStatus === 'connected') {
       floodBroadcast({ type: 'typing', isTyping: false, senderName: username });
     }
-
     const msgId = generateMsgId('msg');
     trackMessageId(msgId);
-
     const msg = {
       id: msgId,
       type: 'text',
@@ -533,13 +625,10 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
       senderName: username,
       timestamp: new Date().toISOString(),
     };
-
     floodBroadcast(msg);
     addMessage({ ...msg, sender: 'local' });
     setInputText('');
     recordActivity();
-    // FIX: requestAnimationFrame is more reliable than a magic 10ms timeout —
-    // fires after the browser has completed the current render cycle
     requestAnimationFrame(() => inputRef.current?.focus());
   }, [inputText, username, floodBroadcast, addMessage, recordActivity, trackMessageId]);
 
@@ -557,7 +646,6 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
     }
     try {
       const prepared = await prepareFileForSending(file);
-      // FIX: Crypto-based file message ID
       const fileMsgId = generateMsgId('file');
       trackMessageId(fileMsgId);
       const msg = {
@@ -605,15 +693,11 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
     if (file) sendFile(file);
   };
 
-  // FIX: Unified copy helper with user feedback (was inconsistent between
-  // ChatRoom header copy and CodeDisplay copy — now both use same logic)
   const copyToClipboard = useCallback(async (text) => {
     let success = false;
     if (navigator.clipboard && window.isSecureContext) {
-      try {
-        await navigator.clipboard.writeText(text);
-        success = true;
-      } catch (e) { /* fall through */ }
+      try { await navigator.clipboard.writeText(text); success = true; }
+      catch (e) { /* fall through */ }
     }
     if (!success) {
       const ta = document.createElement('textarea');
@@ -639,6 +723,8 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
     }
   }, [code, copyToClipboard]);
 
+  // ── Typing display ───────────────────────────────────────────────────────
+
   const activeTypers = Object.keys(typingUsers).filter(
     (user) => typingUsers[user] && user !== username
   );
@@ -654,7 +740,8 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
     formattedTypingText = `${activeTypers[0]}, ${activeTypers[1]} and ${activeTypers.length - 2} others are typing`;
   }
 
-  // --- Error screen ---
+  // ── Render ───────────────────────────────────────────────────────────────
+
   if (error && messages.length === 0) {
     return (
       <div className="chat-container">
@@ -673,7 +760,6 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
     );
   }
 
-  // --- Waiting for partner ---
   if (connectionStatus === 'waiting' && messages.length === 0 && mode !== 'public') {
     return (
       <div className="chat-container">
@@ -682,7 +768,6 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
     );
   }
 
-  // --- Connecting screen (joiner) ---
   if (connectionStatus === 'connecting' && messages.length === 0 && role === 'joiner' && mode !== 'public') {
     return (
       <div className="chat-container">
@@ -709,7 +794,6 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
     );
   }
 
-  // --- Main chat UI ---
   return (
     <div
       className="chat-container"
@@ -728,13 +812,25 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
         </div>
       )}
 
+      {/* ── Call UI overlay ───────────────────────────────────── */}
+      <CallUI
+        callState={callState}
+        callType={callType}
+        remoteStream={remoteStream}
+        localStream={localStream}
+        callerName={callerName}
+        activeCall={activeCallRef.current}
+        onAccept={handleAcceptCall}
+        onReject={handleRejectCall}
+        onHangUp={handleHangUp}
+        onLocalStreamChange={setLocalStream}
+      />
+
       <header className="chat-header">
         <div className="header-left">
           <button onClick={exitRoom} className="back-btn" title="Leave room">←</button>
           <div className="header-room-info">
             <span className="room-label">{mode === 'public' ? 'Lounge' : 'Room'}</span>
-            {/* Copy feedback: use class instead of inline color to avoid
-                -webkit-text-fill-color overriding the green on Safari/Chrome */}
             <span
               className={`room-code${codeCopied ? ' room-code-copied' : ''}`}
               onClick={handleCopyCode}
@@ -746,6 +842,27 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          {/* Call buttons — private mode, connected, no active call */}
+          {connectionStatus === 'connected' && mode !== 'public' && callState === 'idle' && (
+            <>
+              <button
+                className="call-header-btn"
+                onClick={() => startCall('audio')}
+                title="Voice call"
+                aria-label="Start voice call"
+              >
+                📞
+              </button>
+              <button
+                className="call-header-btn"
+                onClick={() => startCall('video')}
+                title="Video call"
+                aria-label="Start video call"
+              >
+                📹
+              </button>
+            </>
+          )}
           {mode === 'public' && (
             <span className="online-count-badge">👥 {onlineCount} Online</span>
           )}

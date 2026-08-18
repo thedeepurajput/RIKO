@@ -3,8 +3,10 @@ const nextConfig = {
   reactStrictMode: true,
   productionBrowserSourceMaps: false,
   allowedDevOrigins: [
-    'localhost:3000',
-    '127.0.0.1:3000',
+    'localhost',
+    '127.0.0.1',
+    '192.168.29.81',
+    '192.168.56.1',
   ],
   // Fix: Turbopack root — suppresses the package-lock.json warning when the
   // project folder sits outside the detected git repository root
