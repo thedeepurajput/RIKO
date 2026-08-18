@@ -7,7 +7,7 @@ export const metadata = {
 
 export default function PrivacyPage() {
   return (
-    <div className="home-container" style={{ minHeight: '100vh', padding: '2rem 1rem' }}>
+    <div className="home-container" style={{ minHeight: '100vh', padding: '2.5rem 1.25rem 6rem 1.25rem' }}>
       <div className="bg-orbs">
         <div className="orb orb-1" />
         <div className="orb orb-2" />
