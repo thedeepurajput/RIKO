@@ -22,6 +22,17 @@ export default function Home() {
         const parsed = JSON.parse(savedSession);
         if (parsed && parsed.code && parsed.role) {
           setActiveSession(parsed);
+          return;
+        }
+      }
+
+      // Auto-detect invite link with ?join=RIXXXX or ?code=RIXXXX
+      if (typeof window !== 'undefined' && window.location.search) {
+        const params = new URLSearchParams(window.location.search);
+        const codeFromUrl = (params.get('join') || params.get('code') || '').toUpperCase().trim();
+        if (codeFromUrl.length === 6) {
+          setJoinCode(codeFromUrl);
+          setActiveTab('join');
         }
       }
     } catch (e) {}
@@ -181,7 +192,7 @@ export default function Home() {
                 <input
                   type="text"
                   className="code-input"
-                  placeholder="XXXXXX"
+                  placeholder="RIXXXX"
                   value={joinCode}
                   onChange={handleCodeInput}
                   onKeyDown={(e) => e.key === 'Enter' && handleJoinPrivate()}

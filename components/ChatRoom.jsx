@@ -5,11 +5,24 @@ import { createPeer, connectToPeer } from '@/lib/peer';
 import { InactivityTracker } from '@/lib/inactivityTracker';
 import { validateFile, prepareFileForSending } from '@/lib/fileTransfer';
 import { getLocalStream, callPeer, answerCall, endCall } from '@/lib/callManager';
+import { VoiceRecorder } from '@/lib/voiceRecorder';
+import {
+  playMessageReceivedSound,
+  playMessageSentSound,
+  startIncomingCallRingtone,
+  stopRingtone,
+  playCallEndSound,
+  playWarningTick,
+  setSoundMuted,
+  isSoundMuted,
+} from '@/lib/soundEffects';
 import MessageBubble from './MessageBubble';
 import FileMessage from './FileMessage';
+import VoiceMessage from './VoiceMessage';
 import ConnectionStatus from './ConnectionStatus';
 import CodeDisplay from './CodeDisplay';
 import CallUI from './CallUI';
+import QRCodeModal from './QRCodeModal';
 
 const SEEN_IDS_MAX = 500;
 const SEEN_IDS_TRIM = 100;
@@ -27,7 +40,7 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
       if (!cached) return [];
       const parsed = JSON.parse(cached);
       return parsed.map((msg) =>
-        msg.type === 'file' ? { ...msg, fileData: null } : msg
+        msg.type === 'file' || msg.type === 'voice' ? { ...msg, fileData: null, audioData: null } : msg
       );
     } catch (e) {
       return [];
@@ -44,6 +57,13 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
   const [typingUsers, setTypingUsers] = useState({});
   const [error, setError] = useState(null);
   const [codeCopied, setCodeCopied] = useState(false);
+  const [isMutedSound, setIsMutedSound] = useState(isSoundMuted());
+  const [showQRModal, setShowQRModal] = useState(false);
+
+  // ── Voice recording state ────────────────────────────────────────────────
+  const [isRecordingVoice, setIsRecordingVoice] = useState(false);
+  const [voiceRecordDuration, setVoiceRecordDuration] = useState(0);
+  const voiceRecorderRef = useRef(null);
 
   // ── Call state ───────────────────────────────────────────────────────────
   const [callState, setCallState] = useState('idle');   // 'idle'|'incoming'|'outgoing'|'active'
@@ -85,7 +105,7 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
   useEffect(() => {
     try {
       const serializable = messages.map((msg) =>
-        msg.type === 'file' ? { ...msg, fileData: null } : msg
+        msg.type === 'file' || msg.type === 'voice' ? { ...msg, fileData: null, audioData: null } : msg
       );
       sessionStorage.setItem('linkchat_msgs_' + code, JSON.stringify(serializable));
     } catch (e) {}
@@ -223,6 +243,7 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
             delete typingPeerTimers.current[data.senderName];
           }
         }
+        playMessageReceivedSound();
         addMessage({
           id: data.id || generateMsgId('rx'),
           type: 'text',
@@ -232,6 +253,7 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
           sender: 'remote',
         });
       } else if (data.type === 'file') {
+        playMessageReceivedSound();
         addMessage({
           id: data.id || generateMsgId('rxf'),
           type: 'file',
@@ -239,6 +261,18 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
           fileSize: data.fileSize,
           fileType: data.fileType,
           fileData: data.fileData,
+          senderName: data.senderName || 'Partner',
+          timestamp: data.timestamp,
+          sender: 'remote',
+        });
+      } else if (data.type === 'voice') {
+        playMessageReceivedSound();
+        addMessage({
+          id: data.id || generateMsgId('rxv'),
+          type: 'voice',
+          audioData: data.audioData,
+          duration: data.duration,
+          mimeType: data.mimeType,
           senderName: data.senderName || 'Partner',
           timestamp: data.timestamp,
           sender: 'remote',
@@ -264,6 +298,8 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
   // ── Call helpers ─────────────────────────────────────────────────────────
 
   const cleanupCall = useCallback((callToClose) => {
+    stopRingtone();
+    playCallEndSound();
     endCall(localStream, callToClose || activeCallRef.current);
     activeCallRef.current = null;
     pendingCallRef.current = null;
@@ -289,6 +325,7 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
         setCallerName(remoteName);
         setCallType(type);
         setCallState('incoming');
+        startIncomingCallRingtone();
 
         call.on('close', () => cleanupCall(call));
         call.on('error', (err) => {
@@ -327,12 +364,20 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
     } catch (err) {
       console.error('Start call error:', err);
       setCallState('idle');
+      addMessage({
+        id: generateMsgId('sys_call_err'),
+        type: 'system',
+        content: `⚠️ Call failed: ${err.message || 'Camera/Microphone permission denied.'}`,
+        timestamp: new Date().toISOString(),
+        sender: 'system',
+      });
     }
-  }, [username, cleanupCall]);
+  }, [username, cleanupCall, addMessage]);
 
   const handleAcceptCall = useCallback(async () => {
     const call = pendingCallRef.current;
     if (!call) return;
+    stopRingtone();
     try {
       const stream = await getLocalStream(callType === 'screen' ? 'video' : callType);
       setLocalStream(stream);
@@ -345,10 +390,19 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
     } catch (err) {
       console.error('Accept call error:', err);
       cleanupCall(call);
+      addMessage({
+        id: generateMsgId('sys_call_err'),
+        type: 'system',
+        content: `⚠️ Could not answer call: ${err.message || 'Camera/Microphone permission denied.'}`,
+        timestamp: new Date().toISOString(),
+        sender: 'system',
+      });
     }
-  }, [callType, cleanupCall]);
+  }, [callType, cleanupCall, addMessage]);
 
   const handleRejectCall = useCallback(() => {
+    stopRingtone();
+    playCallEndSound();
     const call = pendingCallRef.current;
     if (call) { try { call.close(); } catch (e) {} }
     pendingCallRef.current = null;
@@ -627,6 +681,7 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
     };
     floodBroadcast(msg);
     addMessage({ ...msg, sender: 'local' });
+    playMessageSentSound();
     setInputText('');
     recordActivity();
     requestAnimationFrame(() => inputRef.current?.focus());
@@ -660,6 +715,7 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
       };
       floodBroadcast(msg);
       addMessage({ ...msg, sender: 'local' });
+      playMessageSentSound();
       recordActivity();
     } catch (err) {
       addMessage({
@@ -671,6 +727,64 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
       });
     }
   }, [floodBroadcast, username, addMessage, recordActivity, trackMessageId]);
+
+  // ── Voice Recording Handlers ─────────────────────────────────────────────
+  const startVoiceRecording = async () => {
+    try {
+      const recorder = new VoiceRecorder();
+      await recorder.start((secs) => setVoiceRecordDuration(secs));
+      voiceRecorderRef.current = recorder;
+      setIsRecordingVoice(true);
+      setVoiceRecordDuration(0);
+    } catch (err) {
+      addMessage({
+        id: generateMsgId('sys'),
+        type: 'system',
+        content: `⚠️ Microphone access failed: ${err.message || 'Permission denied'}`,
+        timestamp: new Date().toISOString(),
+        sender: 'system',
+      });
+    }
+  };
+
+  const cancelVoiceRecording = () => {
+    if (voiceRecorderRef.current) {
+      voiceRecorderRef.current.cancel();
+      voiceRecorderRef.current = null;
+    }
+    setIsRecordingVoice(false);
+    setVoiceRecordDuration(0);
+  };
+
+  const sendVoiceRecording = async () => {
+    if (!voiceRecorderRef.current) return;
+    try {
+      const result = await voiceRecorderRef.current.stop();
+      setIsRecordingVoice(false);
+      setVoiceRecordDuration(0);
+      voiceRecorderRef.current = null;
+
+      if (result && result.audioData) {
+        const msgId = generateMsgId('voice');
+        trackMessageId(msgId);
+        const msg = {
+          id: msgId,
+          type: 'voice',
+          audioData: result.audioData,
+          duration: result.duration,
+          mimeType: result.mimeType,
+          senderName: username,
+          timestamp: new Date().toISOString(),
+        };
+        floodBroadcast(msg);
+        addMessage({ ...msg, sender: 'local' });
+        playMessageSentSound();
+        recordActivity();
+      }
+    } catch (err) {
+      console.error('Failed to send voice recording:', err);
+    }
+  };
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -812,6 +926,15 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
         </div>
       )}
 
+      {/* ── QR Code Modal ───────────────────────────────────── */}
+      {showQRModal && (
+        <QRCodeModal
+          code={code}
+          onClose={() => setShowQRModal(false)}
+          copyToClipboard={copyToClipboard}
+        />
+      )}
+
       {/* ── Call UI overlay ───────────────────────────────────── */}
       <CallUI
         callState={callState}
@@ -842,6 +965,32 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          {/* Sound Mute/Unmute toggle */}
+          <button
+            className="call-header-btn"
+            onClick={() => {
+              const next = !isMutedSound;
+              setSoundMuted(next);
+              setIsMutedSound(next);
+            }}
+            title={isMutedSound ? 'Unmute audio notifications' : 'Mute audio notifications'}
+            aria-label="Toggle sound notifications"
+          >
+            {isMutedSound ? '🔇' : '🔊'}
+          </button>
+
+          {/* QR Code Share button in private mode */}
+          {mode !== 'public' && (
+            <button
+              className="call-header-btn"
+              onClick={() => setShowQRModal(true)}
+              title="Show QR Code & Invite Link"
+              aria-label="Share room QR code"
+            >
+              📱
+            </button>
+          )}
+
           {/* Call buttons — private mode, connected, no active call */}
           {connectionStatus === 'connected' && mode !== 'public' && callState === 'idle' && (
             <>
@@ -881,6 +1030,8 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
         {messages.map((msg) =>
           msg.type === 'file' ? (
             <FileMessage key={msg.id} message={msg} isSent={msg.sender === 'local'} />
+          ) : msg.type === 'voice' ? (
+            <VoiceMessage key={msg.id} message={msg} isSent={msg.sender === 'local'} />
           ) : (
             <MessageBubble key={msg.id} message={msg} isSent={msg.sender === 'local'} />
           )
@@ -916,35 +1067,77 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
           style={{ display: 'none' }}
           id="file-upload-input"
         />
-        <button
-          className="file-upload-btn"
-          onClick={() => fileInputRef.current?.click()}
-          title="Send file"
-          aria-label="Attach file"
-        >
-          📎
-        </button>
-        <input
-          ref={inputRef}
-          type="text"
-          className="message-input"
-          placeholder={`Type as ${username}...`}
-          value={inputText}
-          onChange={handleInputChange}
-          onKeyDown={handleKeyDown}
-          id="message-input"
-          autoComplete="off"
-          autoFocus
-        />
-        <button
-          className="send-btn"
-          onClick={sendMessage}
-          disabled={!inputText.trim()}
-          title="Send"
-          aria-label="Send message"
-        >
-          ➤
-        </button>
+
+        {isRecordingVoice ? (
+          <div className="recording-bar">
+            <div className="recording-indicator">
+              <span className="recording-dot" />
+              <span className="recording-time">
+                {Math.floor(voiceRecordDuration / 60)}:{(voiceRecordDuration % 60).toString().padStart(2, '0')}
+              </span>
+            </div>
+            <div className="recording-actions">
+              <button
+                type="button"
+                className="recording-cancel-btn"
+                onClick={cancelVoiceRecording}
+              >
+                ✕ Cancel
+              </button>
+              <button
+                type="button"
+                className="send-btn"
+                onClick={sendVoiceRecording}
+                title="Send voice note"
+              >
+                ➤
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <button
+              className="file-upload-btn"
+              onClick={() => fileInputRef.current?.click()}
+              title="Send file"
+              aria-label="Attach file"
+            >
+              📎
+            </button>
+            <input
+              ref={inputRef}
+              type="text"
+              className="message-input"
+              placeholder={`Type as ${username}...`}
+              value={inputText}
+              onChange={handleInputChange}
+              onKeyDown={handleKeyDown}
+              id="message-input"
+              autoComplete="off"
+              autoFocus
+            />
+            {inputText.trim() ? (
+              <button
+                className="send-btn"
+                onClick={sendMessage}
+                title="Send"
+                aria-label="Send message"
+              >
+                ➤
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="mic-btn"
+                onClick={startVoiceRecording}
+                title="Tap to record voice note"
+                aria-label="Record voice note"
+              >
+                🎙️
+              </button>
+            )}
+          </>
+        )}
       </div>
     </div>
   );

@@ -1,12 +1,11 @@
 'use client';
 
 import { useState } from 'react';
+import QRCodeModal from './QRCodeModal';
 
-// FIX: Accepts shared copyToClipboard helper from ChatRoom so both the header
-// code click and this button use the same implementation — no more two divergent
-// fallback copy approaches in the codebase.
 export default function CodeDisplay({ code, onBack, copyToClipboard }) {
   const [copied, setCopied] = useState(false);
+  const [showQR, setShowQR] = useState(false);
 
   const handleCopy = async () => {
     let success = false;
@@ -14,7 +13,6 @@ export default function CodeDisplay({ code, onBack, copyToClipboard }) {
     if (copyToClipboard) {
       success = await copyToClipboard(code);
     } else {
-      // Standalone fallback if used without the prop
       if (navigator.clipboard && window.isSecureContext) {
         try { await navigator.clipboard.writeText(code); success = true; } catch (e) {}
       }
@@ -41,6 +39,14 @@ export default function CodeDisplay({ code, onBack, copyToClipboard }) {
 
   return (
     <div className="waiting-screen">
+      {showQR && (
+        <QRCodeModal
+          code={code}
+          onClose={() => setShowQR(false)}
+          copyToClipboard={copyToClipboard}
+        />
+      )}
+
       <div className="code-display">
         <span className="code-label">Your Private Room Code</span>
         <div className="code-value" aria-label={`Room code: ${code}`}>{code}</div>
@@ -48,6 +54,22 @@ export default function CodeDisplay({ code, onBack, copyToClipboard }) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '1rem' }}>
           <button className="btn-primary" onClick={handleCopy} style={{ padding: '0.85rem' }}>
             {copied ? '✅ Code Copied!' : '📋 Copy Room Code'}
+          </button>
+
+          <button
+            className="btn-secondary"
+            onClick={() => setShowQR(true)}
+            style={{
+              padding: '0.85rem',
+              background: 'rgba(99, 102, 241, 0.15)',
+              border: '1px solid rgba(99, 102, 241, 0.35)',
+              color: '#818cf8',
+              borderRadius: '14px',
+              fontWeight: '600',
+              cursor: 'pointer',
+            }}
+          >
+            📱 Show QR Code / Share Link
           </button>
 
           {onBack && (
