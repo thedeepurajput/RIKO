@@ -146,6 +146,24 @@ export default function Home() {
           <div className="logo-icon">⚡</div>
           <h1 className="app-title">RIKO</h1>
           <p className="app-subtitle">Ephemeral · P2P Encrypted · Auto-Vanish</p>
+          <div style={{ marginTop: '0.65rem' }}>
+            <button
+              type="button"
+              className="privacy-policy-link"
+              onClick={() => setShowPrivacy(true)}
+              style={{
+                background: 'rgba(99, 102, 241, 0.12)',
+                border: '1px solid rgba(99, 102, 241, 0.3)',
+                color: '#a5b4fc',
+                fontSize: '0.82rem',
+                fontWeight: '600',
+                padding: '5px 14px',
+                borderRadius: '20px'
+              }}
+            >
+              🛡️ Zero-Knowledge Privacy Policy & Security Guarantee
+            </button>
+          </div>
         </div>
 
         <div className="action-card">
