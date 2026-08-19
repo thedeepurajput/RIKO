@@ -5,6 +5,7 @@ import { generateCode } from '@/lib/generateCode';
 import { generateAnonymousName } from '@/lib/randomNames';
 import ChatRoom from '@/components/ChatRoom';
 import PrivacyModal from '@/components/PrivacyModal';
+import InstallPWA from '@/components/InstallPWA';
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState('start');
@@ -166,6 +167,9 @@ export default function Home() {
           </div>
         </div>
 
+        {/* PWA Install Banner */}
+        <InstallPWA variant="banner" />
+
         <div className="action-card">
           <div className="action-tabs">
             <button
@@ -303,6 +307,16 @@ export default function Home() {
             <span className="feature-icon">📱</span>
             <h3 className="feature-title">Silent QR</h3>
             <p className="feature-desc">Optical scan, 100% clean URL</p>
+          </div>
+          <div className="feature-item">
+            <span className="feature-icon">📲</span>
+            <h3 className="feature-title">Native PWA</h3>
+            <p className="feature-desc">Install on Android & iPhone</p>
+          </div>
+          <div className="feature-item">
+            <span className="feature-icon">📳</span>
+            <h3 className="feature-title">Mobile Haptics</h3>
+            <p className="feature-desc">Tactile vibration feedback</p>
           </div>
         </div>
 

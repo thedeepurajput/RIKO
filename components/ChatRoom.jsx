@@ -6,6 +6,7 @@ import { InactivityTracker } from '@/lib/inactivityTracker';
 import { validateFile, prepareFileForSending } from '@/lib/fileTransfer';
 import { getLocalStream, callPeer, answerCall, endCall } from '@/lib/callManager';
 import { VoiceRecorder } from '@/lib/voiceRecorder';
+import { triggerHaptic, stopHaptic } from '@/lib/haptics';
 import {
   playMessageReceivedSound,
   playMessageSentSound,
@@ -244,6 +245,7 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
           }
         }
         playMessageReceivedSound();
+        triggerHaptic('incoming');
         addMessage({
           id: data.id || generateMsgId('rx'),
           type: 'text',
@@ -254,6 +256,7 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
         });
       } else if (data.type === 'file') {
         playMessageReceivedSound();
+        triggerHaptic('incoming');
         addMessage({
           id: data.id || generateMsgId('rxf'),
           type: 'file',
@@ -267,6 +270,7 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
         });
       } else if (data.type === 'voice') {
         playMessageReceivedSound();
+        triggerHaptic('incoming');
         addMessage({
           id: data.id || generateMsgId('rxv'),
           type: 'voice',
@@ -299,7 +303,9 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
 
   const cleanupCall = useCallback((callToClose) => {
     stopRingtone();
+    stopHaptic();
     playCallEndSound();
+    triggerHaptic('warning');
     endCall(localStream, callToClose || activeCallRef.current);
     activeCallRef.current = null;
     pendingCallRef.current = null;
@@ -326,6 +332,7 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
         setCallType(type);
         setCallState('incoming');
         startIncomingCallRingtone();
+        triggerHaptic('ringtone');
 
         call.on('close', () => cleanupCall(call));
         call.on('error', (err) => {
@@ -378,6 +385,7 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
     const call = pendingCallRef.current;
     if (!call) return;
     stopRingtone();
+    stopHaptic();
     try {
       const stream = await getLocalStream(callType === 'screen' ? 'video' : callType);
       setLocalStream(stream);
@@ -402,7 +410,9 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
 
   const handleRejectCall = useCallback(() => {
     stopRingtone();
+    stopHaptic();
     playCallEndSound();
+    triggerHaptic('warning');
     const call = pendingCallRef.current;
     if (call) { try { call.close(); } catch (e) {} }
     pendingCallRef.current = null;
@@ -682,6 +692,7 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
     floodBroadcast(msg);
     addMessage({ ...msg, sender: 'local' });
     playMessageSentSound();
+    triggerHaptic('success');
     setInputText('');
     recordActivity();
     requestAnimationFrame(() => inputRef.current?.focus());
@@ -716,6 +727,7 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
       floodBroadcast(msg);
       addMessage({ ...msg, sender: 'local' });
       playMessageSentSound();
+      triggerHaptic('success');
       recordActivity();
     } catch (err) {
       addMessage({
@@ -736,6 +748,7 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
       voiceRecorderRef.current = recorder;
       setIsRecordingVoice(true);
       setVoiceRecordDuration(0);
+      triggerHaptic('medium');
     } catch (err) {
       addMessage({
         id: generateMsgId('sys'),
@@ -754,6 +767,7 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
     }
     setIsRecordingVoice(false);
     setVoiceRecordDuration(0);
+    triggerHaptic('light');
   };
 
   const sendVoiceRecording = async () => {
@@ -779,6 +793,7 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
         floodBroadcast(msg);
         addMessage({ ...msg, sender: 'local' });
         playMessageSentSound();
+        triggerHaptic('success');
         recordActivity();
       }
     } catch (err) {
@@ -832,6 +847,7 @@ export default function ChatRoom({ code, role, mode, username, onLeave }) {
   const handleCopyCode = useCallback(async () => {
     const ok = await copyToClipboard(code);
     if (ok) {
+      triggerHaptic('light');
       setCodeCopied(true);
       setTimeout(() => setCodeCopied(false), 2000);
     }

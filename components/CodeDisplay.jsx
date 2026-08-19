@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import QRCodeModal from './QRCodeModal';
+import { triggerHaptic } from '@/lib/haptics';
 
 export default function CodeDisplay({ code, onBack, copyToClipboard }) {
   const [copied, setCopied] = useState(false);
@@ -32,6 +33,7 @@ export default function CodeDisplay({ code, onBack, copyToClipboard }) {
     }
 
     if (success) {
+      triggerHaptic('light');
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     }
