@@ -5,8 +5,22 @@ import { getQRCodeUrl } from '@/lib/qrGenerator';
 export default function QRCodeModal({ code, onClose, expiresAt }) {
   const getInviteUrl = () => {
     if (typeof window === 'undefined') return '';
-    const expiry = Number(expiresAt) || Date.now() + 60000;
-    const params = new URLSearchParams({ join: code, expires: String(expiry) });
+
+    let roomExpiresAt = Number(expiresAt) || 0;
+    if (!roomExpiresAt) {
+      try {
+        const session = JSON.parse(sessionStorage.getItem('riko_active_session') || 'null');
+        roomExpiresAt = Number(session?.expiresAt) || 0;
+      } catch (e) {}
+    }
+
+    // Legacy sessions receive a single expiry window when the QR is opened.
+    if (!roomExpiresAt) roomExpiresAt = Date.now() + 60000;
+
+    const params = new URLSearchParams({
+      join: code,
+      expires: String(roomExpiresAt),
+    });
     return `${window.location.origin}/?${params.toString()}`;
   };
 
@@ -24,7 +38,7 @@ export default function QRCodeModal({ code, onClose, expiresAt }) {
           <img src={qrCodeSrc} alt="Scan QR code to connect" className="qr-image" />
         </div>
         <p className="qr-hint" style={{ fontSize: '0.9rem', color: '#cbd5e1', marginTop: '0.5rem', marginBottom: '1.25rem' }}>
-          Scan with your phone camera to connect directly. This invite expires in 60 seconds.
+          Scan with your phone camera to connect directly. This invite expires after 60 seconds.
         </p>
         <button className="btn-primary" onClick={onClose} style={{ width: '100%', padding: '0.85rem' }}>
           ✓ Done
